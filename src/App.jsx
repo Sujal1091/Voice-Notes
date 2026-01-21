@@ -10,8 +10,8 @@ import {
 import Login from './components/login';
 import Signup from './components/Signup'; // Import your Login component
 import { onAuthStateChanged, signOut } from 'firebase/auth'; // Import auth methods
-import { auth, googleProvider } from './config/firebase'; // Import auth instance
-import { db } from './config/firebase'; // Import Firestore instance
+import { auth, googleProvider } from './config/firebase.js'; // Import auth instance
+import { db } from './config/firebase.js'; // Import Firestore instance
 // --- CONSTANTS ---
 
 const LANGUAGES = [
