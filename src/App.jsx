@@ -157,6 +157,8 @@ function VoiceNotesDashboard({ user, onLogout }) {
     };
     draw();
   };
+  console.log(import.meta.env);
+
 
   const stopVisualizer = () => {
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
