@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Mic, MicOff, Save, Trash2, Play, Square, FileText, Clock, 
-  AlertCircle, WifiOff, RefreshCw, Moon, Sun, Copy, Download, 
-  Search, Sparkles, LogOut, Check // Added LogOut icon
+import Preloader from './components/Preloader.jsx';
+import {
+  Mic, Square, Save, Trash2, Play, FileText, Clock,
+  AlertCircle, Moon, Sun, Copy, Download,
+  Search, Sparkles, LogOut, Check, MoreVertical, Edit, Share2, Languages
 } from 'lucide-react';
-import { 
-  collection, addDoc, deleteDoc, doc, onSnapshot, query, where, orderBy, serverTimestamp 
+import {
+  collection, addDoc, deleteDoc, doc, onSnapshot, query, where, orderBy, serverTimestamp, updateDoc
 } from 'firebase/firestore';
+import './App.css';
 import Login from './components/login';
 import Signup from './components/Signup'; // Import your Login component
 import { onAuthStateChanged, signOut } from 'firebase/auth'; // Import auth methods
@@ -50,16 +52,23 @@ function VoiceNotesDashboard({ user, onLogout }) {
   const [isPlaying, setIsPlaying] = useState(null);
   const [error, setError] = useState(null);
   
+  
   // UI States
   const [darkMode, setDarkMode] = useState(false);
   const [language, setLanguage] = useState('en-US');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('personal');
   const [copiedId, setCopiedId] = useState(null);
+  const [editingNote, setEditingNote] = useState(null); // Handles both data and modal visibility
+  const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
+  const [langSearch, setLangSearch] = useState('');
+  const [audioLoading, setAudioLoading] = useState(null);
+
   
   // Restored States for AI features
   const [isSummarizing, setIsSummarizing] = useState(null);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
+
 
   // Refs
   const recognitionRef = useRef(null);
@@ -70,6 +79,7 @@ function VoiceNotesDashboard({ user, onLogout }) {
   const sourceRef = useRef(null);
   const animationFrameRef = useRef(null);
   const noteRef = useRef(''); 
+  const [openMenuId, setOpenMenuId] = useState(null);
 
   useEffect(() => {
     noteRef.current = currentNote;
@@ -162,9 +172,9 @@ function VoiceNotesDashboard({ user, onLogout }) {
   const stopVisualizer = () => {
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     if (sourceRef.current) {
-        sourceRef.current.mediaStream.getTracks().forEach(track => track.stop());
-        sourceRef.current.disconnect();
-    }
+    sourceRef.current.mediaStream.getTracks().forEach(track => track.stop());
+    sourceRef.current.disconnect();
+}
     if (audioContextRef.current) audioContextRef.current.close();
     if (canvasRef.current) {
         const ctx = canvasRef.current.getContext('2d');
@@ -224,8 +234,91 @@ function VoiceNotesDashboard({ user, onLogout }) {
 
   const toggleRecording = () => isRecording ? stopRecordingCleanup() : startRecording();
 
-  // --- ACTIONS ---
+          // --- ACTIONS ---
+        // 1. Open the Modal
+        const handleEdit = (note) => {
+          setEditingNote(note); // Set the note to be edited
+          setOpenMenuId(null);  // Close the dropdown menu if it's open
+        };
+
+        // 2. Save Changes to Firebase
+        const handleUpdateNote = async () => {
+          if (!editingNote) return;
+
+          try {
+            const noteRef = doc(db, 'notes', editingNote.id);
+            
+            await updateDoc(noteRef, {
+              title: editingNote.title,
+              text: editingNote.text,
+              category: editingNote.category, // Optional: if you want to allow changing category
+              updatedAt: serverTimestamp()
+            });
+
+            setEditingNote(null); // Close the modal
+          } catch (err) {
+            console.error("Error updating note:", err);
+            setError("Failed to update note.");
+          }
+        };
+
+
+// --- NEW TRANSLATE FUNCTION (No Backend Needed) ---
+const handleTranslate = async (note) => {
+  // 1. Get the target language code (e.g., "hi-IN" becomes "hi")
+  const targetLang = language.split('-')[0]; 
   
+  if (!targetLang) return;
+
+  // Visual feedback
+  const confirmTranslate = window.confirm(
+    `Translate this note to ${LANGUAGES.find(l => l.code === language)?.name}?`
+  );
+  if (!confirmTranslate) return;
+
+  try {
+    console.log(`Translating to ${targetLang}...`);
+
+    // 2. Helper function to call the Free API
+    const translateText = async (text) => {
+      if (!text) return "";
+      const response = await fetch(
+        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=autodetect|${targetLang}`
+      );
+      const data = await response.json();
+      return data.responseData.translatedText;
+    };
+
+    // 3. Translate Title and Text in parallel (faster)
+    const [newTitle, newText] = await Promise.all([
+      translateText(note.title),
+      translateText(note.text)
+    ]);
+
+    // 4. Update the UI Immediately (Optimistic Update)
+    setSavedNotes(prev => 
+      prev.map(n => 
+        n.id === note.id ? { ...n, title: newTitle, text: newText } : n
+      )
+    );
+
+    // 5. Save changes to Firebase
+    const noteRef = doc(db, 'notes', note.id);
+    await updateDoc(noteRef, {
+      title: newTitle,
+      text: newText,
+      language: language // Optional: store which language it is now
+    });
+    
+    setOpenMenuId(null); // Close the menu
+    alert("Translation Complete!");
+
+  } catch (error) {
+    console.error("Translation failed:", error);
+    alert("Translation failed. The free API might be busy.");
+  }
+};
+
   // NOTE SAVING LOGIC
   const saveNote = async (textToSave) => {
     // Determine what text to save (manual button click passes event object, so check type)
@@ -237,8 +330,8 @@ function VoiceNotesDashboard({ user, onLogout }) {
       let finalTitle = noteTitle;
       // Auto-generate title if missing
       if (!finalTitle) {
-         const words = text.split(' ');
-         finalTitle = words.slice(0, 4).join(' ') + (words.length > 4 ? '...' : '');
+        const words = text.split(' ');
+        finalTitle = words.slice(0, 4).join(' ') + (words.length > 4 ? '...' : '');
       }
 
       await addDoc(collection(db, 'notes'), {
@@ -274,15 +367,69 @@ function VoiceNotesDashboard({ user, onLogout }) {
     }, 800);
   };
 
-  const speakText = (text, id) => {
-    if (isPlaying === id) { window.speechSynthesis.cancel(); setIsPlaying(null); return; }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = language;
-    utterance.onend = () => setIsPlaying(null);
-    setIsPlaying(id);
-    window.speechSynthesis.speak(utterance);
-  };
+      const speakText = async (text, id) => {
+      // 1. Stop if already playing
+      if (isPlaying === id) {
+        window.speechSynthesis.cancel();
+        setIsPlaying(null);
+        return;
+      }
+
+      // 2. Stop any previous audio
+      window.speechSynthesis.cancel();
+      setAudioLoading(id); // Start loading spinner
+
+      const targetLang = language.split('-')[0]; // e.g., "hi" from "hi-IN"
+      let textToSpeak = text;
+
+      try {
+        // 3. CHECK: Do we need to translate?
+        // We assume the note is in English if not specified. 
+        // If target is NOT English, we try to translate.
+        if (targetLang !== 'en') {
+            console.log(`Translating audio to ${targetLang}...`);
+            
+            const response = await fetch(
+                `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLang}`
+            );
+            const data = await response.json();
+            
+            // Use the translated text if found, otherwise fallback to original
+            if (data.responseData.translatedText) {
+                textToSpeak = data.responseData.translatedText;
+            }
+        }
+
+        // 4. Speak the (potentially translated) text
+        const utterance = new SpeechSynthesisUtterance(textToSpeak);
+        utterance.lang = language; // Use the accent of the selected language
+        
+        utterance.onstart = () => {
+            setAudioLoading(null); // Stop loading, start playing icon
+            setIsPlaying(id);
+        };
+        
+        utterance.onend = () => {
+            setIsPlaying(null);
+        };
+
+        utterance.onerror = () => {
+            setAudioLoading(null);
+            setIsPlaying(null);
+        };
+
+        window.speechSynthesis.speak(utterance);
+
+      } catch (error) {
+        console.error("Audio translation failed:", error);
+        // Fallback: Just read the original text if translation fails
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = language;
+        window.speechSynthesis.speak(utterance);
+        setAudioLoading(null);
+        setIsPlaying(id);
+      }
+    };
 
   const copyToClipboard = (text, id) => {
     navigator.clipboard.writeText(text);
@@ -292,16 +439,43 @@ function VoiceNotesDashboard({ user, onLogout }) {
 
   // DOWNLOAD FUNCTION
   const exportNote = (note) => {
-    const element = document.createElement("a");
-    const file = new Blob([
-      `Title: ${note.title}\nDate: ${note.date}\nCategory: ${note.category}\n\nNote:\n${note.text}\n\nSummary:\n${note.summary || 'N/A'}`
-    ], {type: 'text/plain'});
-    element.href = URL.createObjectURL(file);
-    element.download = `voice-note-${note.id}.txt`;
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
-  };
+  const content = `${note.title}\n\n${note.text}`;
+  const blob = new Blob([content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${note.title || 'note'}.txt`;
+  a.click();
+
+  URL.revokeObjectURL(url);
+};
+
+//SHare FUNCTION (placeholder)
+const handleShare = (note) => {
+  const text = `${note.title || "My Note"}\n\n${note.content}`;
+
+  // 1️⃣ If browser supports system share (BEST)
+  if (navigator.share) {
+    navigator
+      .share({
+        title: note.title || "Voice Note",
+        text,
+      })
+      .catch(() => {});
+    return;
+  }
+
+  // 2️⃣ Fallback: open WhatsApp
+  const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(whatsappUrl, "_blank");
+
+  // 3️⃣ Email fallback (optional)
+  const emailUrl = `mailto:?subject=${encodeURIComponent(
+    note.title || "Voice Note"
+  )}&body=${encodeURIComponent(text)}`;
+  window.open(emailUrl, "_self");
+};
 
   // AI SUMMARY SIMULATION
   const simulateAISummary = (id, text) => {
@@ -335,9 +509,7 @@ function VoiceNotesDashboard({ user, onLogout }) {
           </div>
           
           <div className="flex items-center gap-3">
-              <select value={language} onChange={(e) => setLanguage(e.target.value)} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                {LANGUAGES.map(lang => <option key={lang.code} value={lang.code}>{lang.name}</option>)}
-              </select>
+              
               <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700">
                 {darkMode ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-slate-600" />}
               </button>
@@ -409,7 +581,7 @@ function VoiceNotesDashboard({ user, onLogout }) {
               
               {/* RESTORED SAVE BUTTON */}
               <button onClick={() => saveNote(currentNote)} disabled={!currentNote.trim()} className="w-full md:w-auto px-6 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-md">
-                <Save className="w-4 h-4" /> Save to Cloud
+                <Save className="w-4 h-4" /> Save
               </button>
             </div>
           </div>
@@ -422,10 +594,81 @@ function VoiceNotesDashboard({ user, onLogout }) {
               <FileText className="w-5 h-5" /> Saved Notes
               <span className="bg-indigo-100 dark:bg-indigo-900 text-indigo-700 text-xs px-2 py-1 rounded-full">{savedNotes.length}</span>
             </h2>
-            <div className="relative w-full md:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input type="text" placeholder="Search notes..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-            </div>
+            {/* --- CONTAINER FOR LANGUAGE & SEARCH --- */}
+<div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+
+  {/* 1. NEW CUSTOM LANGUAGE DROPDOWN */}
+  <div className="relative">
+    {/* The Trigger Button */}
+    <button 
+      onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
+      className="flex items-center justify-between w-full md:w-48 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium hover:border-indigo-500 transition-colors"
+    >
+      <span className="flex items-center gap-2">
+        <Languages className="w-4 h-4 text-slate-400" />
+        {LANGUAGES.find(l => l.code === language)?.name || "Select Language"}
+      </span>
+      {/* Chevron Icon */}
+      <svg className={`w-4 h-4 text-slate-400 transition-transform ${isLangMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+    </button>
+
+    {/* The Dropdown Menu (Visible only when open) */}
+    {isLangMenuOpen && (
+      <div className="absolute top-full left-0 mt-2 w-full md:w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden">
+        
+        {/* Search Input inside Dropdown */}
+        <div className="p-2 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 sticky top-0">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+            <input 
+              type="text" 
+              placeholder="Search language..." 
+              value={langSearch}
+              onChange={(e) => setLangSearch(e.target.value)}
+              autoFocus
+              className="w-full pl-7 pr-2 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
+            />
+          </div>
+        </div>
+
+        {/* Scrollable Language List */}
+        <div className="max-h-60 overflow-y-auto p-1 custom-scrollbar">
+          {LANGUAGES.filter(l => l.name.toLowerCase().includes(langSearch.toLowerCase())).length === 0 ? (
+            <div className="px-3 py-2 text-xs text-slate-400 text-center">No language found</div>
+          ) : (
+            LANGUAGES.filter(l => l.name.toLowerCase().includes(langSearch.toLowerCase())).map(lang => (
+              <button
+                key={lang.code}
+                onClick={() => {
+                  setLanguage(lang.code);
+                  setIsLangMenuOpen(false);
+                  setLangSearch('');
+                }}
+                className={`w-full text-left px-3 py-2 text-sm rounded-lg flex items-center justify-between group hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors ${language === lang.code ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' : 'text-slate-600 dark:text-slate-300'}`}
+              >
+                {lang.name}
+                {language === lang.code && <Check className="w-3 h-3" />}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    )}
+  </div>
+
+  {/* 2. EXISTING SEARCH BAR (Moved here) */}
+  <div className="relative w-full md:w-64">
+    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+    <input 
+      type="text" 
+      placeholder="Search notes..." 
+      value={searchQuery} 
+      onChange={(e) => setSearchQuery(e.target.value)} 
+      className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" 
+    />
+  </div>
+
+</div>
           </div>
 
           {filteredNotes.length === 0 ? (
@@ -438,37 +681,116 @@ function VoiceNotesDashboard({ user, onLogout }) {
                 <div key={note.id} className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow flex flex-col h-full">
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex flex-col gap-1">
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full w-fit font-medium uppercase tracking-wider ${CATEGORIES.find(c => c.id === note.category)?.color}`}>
-                          {note.category}
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full w-fit font-medium uppercase tracking-wider ${
+                          CATEGORIES.find(c => c.id === note.category)?.color
+                        }`}
+                      >
+                        {note.category}
                       </span>
+
                       <h3 className="font-bold text-gray-900 dark:text-white leading-tight">
                         {note.title || "Untitled Note"}
                       </h3>
+
                       <div className="flex items-center text-xs text-slate-400 gap-1">
                         <Clock className="w-3 h-3" /> {note.date}
                       </div>
+
+                      <p className="text-sm text-slate-600 dark:text-slate-300 line-clamp-3 my-1">
+                        {note.text}
+                      </p>
                     </div>
-                    <div className="flex gap-1">
-                      <button onClick={() => speakText(note.text, note.id)} className="p-1.5 text-slate-400 hover:text-indigo-500 rounded-full">
-                        {isPlaying === note.id ? <Square className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
-                      </button>
-                      <button onClick={() => copyToClipboard(note.text, note.id)} className="p-1.5 text-slate-400 hover:text-green-500 rounded-full">
-                        {copiedId === note.id ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                      </button>
-                      
-                      {/* RESTORED DOWNLOAD BUTTON */}
-                      <button onClick={() => exportNote(note)} className="p-1.5 text-slate-400 hover:text-blue-500 rounded-full">
-                        <Download className="w-4 h-4" />
+
+                    {/* ACTIONS */}
+                    <div className="flex items-center gap-1 relative">
+
+                      {/* PLAY BUTTON (OUTSIDE MENU) */}
+                      <button
+                          onClick={() => speakText(note.text, note.id)}
+                          disabled={audioLoading === note.id} // Disable while loading
+                          className="p-1.5 text-slate-400 hover:text-indigo-500 rounded-full transition-colors"
+                        >
+                          {audioLoading === note.id ? (
+                            // LOADING SPINNER
+                            <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                          ) : isPlaying === note.id ? (
+                            // STOP ICON
+                            <Square className="w-4 h-4 fill-current text-indigo-500" />
+                          ) : (
+                            // PLAY ICON
+                            <Play className="w-4 h-4 fill-current" />
+                          )}
+                        </button>
+
+                      {/* 3 DOT MENU */}
+                      <button
+                        onClick={() =>
+                          setOpenMenuId(openMenuId === note.id ? null : note.id)
+                        }
+                        className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full"
+                      >
+                        <MoreVertical className="w-4 h-4" />
                       </button>
 
-                      <button onClick={() => deleteNote(note.id)} className="p-1.5 text-slate-400 hover:text-red-500 rounded-full">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {openMenuId === note.id && (
+                        <div className="absolute right-0 top-8 z-30 w-44 bg-white dark:bg-slate-800 
+                                        border border-slate-200 dark:border-slate-700 
+                                        rounded-lg shadow-lg overflow-hidden">
+
+                          <button className="menu-item"
+                            onClick={() => handleEdit(note)}
+                            >
+                            <Edit className="w-4 h-4" />
+                            Edit
+                          </button>
+
+                          <button
+                            onClick={() => handleTranslate(note)}
+                            className="menu-item"
+                          >
+                            <Languages className="w-4 h-4" />
+                            Translate
+                          </button>
+
+                          <button
+                            onClick={() => copyToClipboard(note.text, note.id)}
+                            className="menu-item"
+                          >
+                            <Copy className="w-4 h-4" />
+                            Copy
+                          </button>
+
+                          <button
+                            onClick={() => exportNote(note)}
+                            className="menu-item"
+                          >
+                            <Download className="w-4 h-4" />
+                            Download
+                          </button>
+
+                          <button
+                            onClick={() => handleShare(note)}
+                            className="menu-item"
+                          >
+                            <Share2 className="w-4 h-4" />
+                            Share
+                            </button>
+
+
+                          <button
+                            onClick={() => deleteNote(note.id)}
+                            className="menu-item text-red-500"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="flex-1 mb-4">
-                      <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed line-clamp-4">{note.text}</p>
-                  </div>
+
+
 
                   {/* RESTORED AI SUMMARY BUTTON */}
                   <div className="mt-auto pt-3 border-t border-slate-100 dark:border-slate-700">
@@ -488,63 +810,140 @@ function VoiceNotesDashboard({ user, onLogout }) {
             </div>
           )}
         </div>
+            {/* --- EDIT MODAL --- */}
+      {editingNote && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden animation-fade-in">
+            
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-950/50">
+              <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                <Edit className="w-5 h-5 text-indigo-500" /> Edit Note
+              </h3>
+              <button 
+                onClick={() => setEditingNote(null)}
+                className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full transition-colors"
+              >
+                <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Title</label>
+                <input 
+                  type="text" 
+                  value={editingNote.title} 
+                  onChange={(e) => setEditingNote({ ...editingNote, title: e.target.value })}
+                  className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-semibold text-slate-800 dark:text-slate-100"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Content</label>
+                <textarea 
+                  value={editingNote.text} 
+                  onChange={(e) => setEditingNote({ ...editingNote, text: e.target.value })}
+                  className="w-full h-40 p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none resize-none text-slate-700 dark:text-slate-300 leading-relaxed"
+                />
+              </div>
+
+              {/* Category Selection in Edit (Optional) */}
+              <div>
+                <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">Category</label>
+                <div className="flex gap-2">
+                  {CATEGORIES.map(cat => (
+                    <button 
+                      key={cat.id} 
+                      onClick={() => setEditingNote({ ...editingNote, category: cat.id })}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${editingNote.category === cat.id ? `${cat.color} ring-2 ring-indigo-500` : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}`}
+                    >
+                      {cat.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 bg-slate-50 dark:bg-slate-950/50 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-3">
+              <button 
+                onClick={() => setEditingNote(null)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleUpdateNote}
+                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow-lg shadow-indigo-500/30 transition-all flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" /> Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
+
     </div>
   );
 }
+
+
+
 
 // --- MAIN APP COMPONENT ---
 export default function App() {
   const [user, setUser] = useState(null);
   const [authView, setAuthView] = useState('login');
+  
+  // 1. Initialize loading to true
   const [loading, setLoading] = useState(true); 
 
-  // 1. LISTEN TO FIREBASE: This effect runs once on load
+  // 2. LISTEN TO FIREBASE & HANDLE DELAY
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      setLoading(false); // Stop loading once Firebase tells us the status
+      
+      // Add a 2-second delay so the user can see your Preloader animation
+      // properly before the app appears.
+      setTimeout(() => {
+        setLoading(false);
+      }, 2000); 
     });
 
-    return () => unsubscribe(); // Cleanup subscription
+    return () => unsubscribe(); 
   }, []);
 
-  // 2. HANDLE LOGOUT
-const handleLogout = async () => {
+  // 3. HANDLE LOGOUT
+  const handleLogout = async () => {
     try {
       await signOut(auth);
-      setAuthView('login'); // <--- ADD THIS LINE
+      setAuthView('login');
     } catch (error) {
       console.error("Error signing out:", error);
     }
   };
 
-  // 3. SHOW LOADING SCREEN (while Firebase connects)
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center">
-        <p className="text-gray-500">Loading...</p>
-      </div>
-    );
-  }
-
-  // 4. IF LOGGED IN: Show Dashboard
-  if (user) {
-    return <VoiceNotesDashboard user={user} onLogout={handleLogout} />;
-  }
-
-  // 5. IF NOT LOGGED IN: Show Signup or Login
-  if (authView === 'signup') {
-    return (
-      <Signup 
-        onSwitchToLogin={() => setAuthView('login')} 
-      />
-    );
-  }
-
+  // 4. RENDER WITH PRELOADER
   return (
-    <Login 
-      onSwitchToSignup={() => setAuthView('signup')} 
-    />
+    <>
+      {/* The Preloader handles its own fade-out logic */}
+      <Preloader isLoading={loading} />
+
+      {/* Only show the main app when loading is finished */}
+      {!loading && (
+        <div className="animate-fade-in"> 
+          {user ? (
+            <VoiceNotesDashboard user={user} onLogout={handleLogout} />
+          ) : authView === 'signup' ? (
+            <Signup onSwitchToLogin={() => setAuthView('login')} />
+          ) : (
+            <Login onSwitchToSignup={() => setAuthView('signup')} />
+          )}
+        </div>
+      )}
+    </>
   );
 }

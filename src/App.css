@@ -1,1 +1,25 @@
-/* Empty file */
+    .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    width: 100%;
+    padding: 10px 14px;
+
+    font-size: 13px;
+    text-align: left;
+
+    background: transparent;
+    border: none;
+    cursor: pointer;
+
+    color: inherit;
+    }
+
+    .menu-item:hover {
+    background-color: rgba(99, 102, 241, 0.08);
+    }
+
+    .menu-item svg {
+    flex-shrink: 0;
+    }
