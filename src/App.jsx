@@ -14,6 +14,7 @@ import Signup from './components/Signup'; // Import your Login component
 import { onAuthStateChanged, signOut } from 'firebase/auth'; // Import auth methods
 import { auth, googleProvider } from './config/firebase.js'; // Import auth instance
 import { db } from './config/firebase.js'; // Import Firestore instance
+import { model } from './config/gemini.js'; // Import Gemini model
 // --- CONSTANTS ---
 
 const LANGUAGES = [
@@ -68,6 +69,7 @@ function VoiceNotesDashboard({ user, onLogout }) {
   // Restored States for AI features
   const [isSummarizing, setIsSummarizing] = useState(null);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
 
 
   // Refs
@@ -122,12 +124,6 @@ function VoiceNotesDashboard({ user, onLogout }) {
     }
   }, [darkMode]);
 
-  // --- AUTO-SAVE LOGIC ---
-  useEffect(() => {
-    if (!isRecording && noteRef.current.trim().length > 0) {
-      saveNote(noteRef.current);
-    }
-  }, [isRecording]);
 
   // --- AUDIO VISUALIZER ---
   const startVisualizer = async () => {
@@ -169,68 +165,90 @@ function VoiceNotesDashboard({ user, onLogout }) {
   };
 
 
-  const stopVisualizer = () => {
-    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-    if (sourceRef.current) {
-    sourceRef.current.mediaStream.getTracks().forEach(track => track.stop());
+const stopVisualizer = () => {
+  if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+  
+  if (sourceRef.current) {
     sourceRef.current.disconnect();
-}
-    if (audioContextRef.current) audioContextRef.current.close();
-    if (canvasRef.current) {
-        const ctx = canvasRef.current.getContext('2d');
-        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+  }
+
+  // ADD THIS CHECK: Only close if it's not already closed
+  if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+    audioContextRef.current.close();
+  }
+};
+
+  const stopRecordingCleanup = () => {
+  isIntentionalStop.current = true;
+
+  if (recognitionRef.current) {
+    recognitionRef.current.stop();
+    recognitionRef.current = null;
+  }
+
+  stopVisualizer();
+  setIsRecording(false);
+};
+
+
+const startRecording = () => {
+  setError(null);
+
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    setError('Speech recognition not supported');
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = language || 'en-IN';
+
+  recognition.onstart = () => {
+    isIntentionalStop.current = false;
+    setIsRecording(true);
+    startVisualizer();
+  };
+
+  recognition.onresult = (event) => {
+    let finalText = '';
+    let interimText = '';
+
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        finalText += transcript + ' ';
+      } else {
+        interimText += transcript;
+      }
+    }
+
+    if (finalText) {
+      setCurrentNote(prev => prev + finalText);
+    }
+
+    setInterimTranscript(interimText);
+  };
+
+  recognition.onerror = (e) => {
+    if (['no-speech', 'aborted'].includes(e.error)) return;
+    console.error(e);
+  };
+
+  recognition.onend = () => {
+    if (!isIntentionalStop.current) {
+      recognition.start();
+    } else {
+      stopRecordingCleanup();
     }
   };
 
-  // --- RECORDING LOGIC ---
-  const startRecording = () => {
-    setError(null);
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
+  recognitionRef.current = recognition;
+  recognition.start();
+};
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = language;
-
-    recognition.onstart = () => {
-      isIntentionalStop.current = false;
-      setIsRecording(true);
-      startVisualizer();
-    };
-
-    recognition.onresult = (event) => {
-      let finalTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
-      }
-      if (finalTranscript) {
-        setCurrentNote(prev => {
-          const prefix = prev.length > 0 && !prev.endsWith(' ') ? ' ' : '';
-          return prev + prefix + finalTranscript;
-        });
-      }
-    };
-
-    recognition.onerror = (event) => {
-      if (['no-speech', 'aborted'].includes(event.error)) return;
-      stopRecordingCleanup();
-    };
-
-    recognition.onend = () => {
-      if (!isIntentionalStop.current) stopRecordingCleanup();
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-  };
-
-  const stopRecordingCleanup = () => {
-    isIntentionalStop.current = true;
-    if (recognitionRef.current) recognitionRef.current.stop();
-    stopVisualizer();
-    setIsRecording(false);
-  };
 
   const toggleRecording = () => isRecording ? stopRecordingCleanup() : startRecording();
 
@@ -355,17 +373,36 @@ const handleTranslate = async (note) => {
     await deleteDoc(doc(db, 'notes', id));
   };
 
-  // TITLE GENERATOR
-  const generateTitle = () => {
-    if (!currentNote) return;
-    setIsGeneratingTitle(true);
-    setTimeout(() => {
-      const words = currentNote.split(' ');
-      const newTitle = words.slice(0, 5).join(' ') + (words.length > 5 ? '...' : '');
-      setNoteTitle(newTitle.charAt(0).toUpperCase() + newTitle.slice(1));
-      setIsGeneratingTitle(false);
-    }, 800);
-  };
+      const generateTitle = async () => {
+        if (!currentNote.trim() || isGeneratingTitle) return;
+        
+        setIsGeneratingTitle(true); 
+        setError(null); 
+
+        try {
+          const prompt = `Generate a very short, catchy title (maximum 5 words) for the following note. Do not use quotes. Note: "${currentNote}"`;
+          
+          const result = await model.generateContent(prompt);
+          
+          // FIX: Safely access the text function
+          // In newer SDKs, 'result.response' is NOT a promise you await, it's a property.
+          // We try to access it directly first.
+          const response = result.response; 
+          const aiTitle = response.text().trim();
+          
+          setNoteTitle(aiTitle);
+        } catch (err) {
+          console.error("AI Title Error:", err);
+          // Specific error handling for the 404/429 issues you saw earlier
+          if (err.message.includes("429")) {
+              setError("Too many requests. Please wait a moment.");
+          } else {
+              setError("Failed to generate title. Try again.");
+          }
+        } finally {
+          setIsGeneratingTitle(false); 
+        }
+      };
 
       const speakText = async (text, id) => {
       // 1. Stop if already playing
@@ -477,15 +514,32 @@ const handleShare = (note) => {
   window.open(emailUrl, "_self");
 };
 
-  // AI SUMMARY SIMULATION
-  const simulateAISummary = (id, text) => {
-    setIsSummarizing(id);
-    setTimeout(() => {
-        const summary = `• ${text.slice(0, 20)}...\n• Key point extracted from audio.`;
-        // To save summary permanently: updateDoc(doc(db, 'notes', id), { summary: summary });
-        setIsSummarizing(null);
-    }, 1500);
-  };
+// --- REAL AI SUMMARY GENERATOR ---
+const handleGenerateSummary = async (id, text) => {
+  if (!text) return;
+  
+  setIsSummarizing(id); // Show loading state on the specific button
+
+  try {
+    const prompt = `Summarize the following text into 3 concise bullet points. Use plain text, no markdown symbols like ** or ##. Text: "${text}"`;
+    
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const summaryText = response.text().trim();
+
+    // Save the summary permanently to Firebase
+    const noteRef = doc(db, 'notes', id);
+    await updateDoc(noteRef, {
+      summary: summaryText
+    });
+
+  } catch (err) {
+    console.error("AI Summary Error:", err);
+    alert("Could not generate summary.");
+  } finally {
+    setIsSummarizing(null); // Stop loading
+  }
+};
 
   const filteredNotes = savedNotes.filter(note => 
     note.text.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -792,16 +846,32 @@ const handleShare = (note) => {
 
 
 
-                  {/* RESTORED AI SUMMARY BUTTON */}
+                  {/* AI SUMMARY SECTION */}
                   <div className="mt-auto pt-3 border-t border-slate-100 dark:border-slate-700">
                     {note.summary ? (
-                        <div className="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-lg text-xs text-indigo-800 dark:text-indigo-200">
-                          <div className="flex items-center gap-1 mb-1 font-semibold"><Sparkles className="w-3 h-3" /> AI Summary</div>
-                          {note.summary}
+                      <div className="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-lg text-xs text-indigo-800 dark:text-indigo-200">
+                        <div className="flex items-center gap-1 mb-1 font-semibold">
+                          <Sparkles className="w-3 h-3" /> AI Summary
                         </div>
+                        {/* We use whitespace-pre-line so the bullet points display on new lines */}
+                        <p className="whitespace-pre-line leading-relaxed">{note.summary}</p>
+                      </div>
                     ) : (
-                      <button onClick={() => simulateAISummary(note.id, note.text)} disabled={isSummarizing === note.id} className="w-full py-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 transition-colors flex items-center justify-center gap-1">
-                          {isSummarizing === note.id ? "Generating..." : <><Sparkles className="w-3 h-3" /> Summarize with AI</>}
+                      <button 
+                        onClick={() => handleGenerateSummary(note.id, note.text)} // <--- UPDATED FUNCTION NAME
+                        disabled={isSummarizing === note.id} 
+                        className="w-full py-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 transition-colors flex items-center justify-center gap-1"
+                      >
+                        {isSummarizing === note.id ? (
+                          <>
+                            <div className="w-3 h-3 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3 h-3" /> Summarize with AI
+                          </>
+                        )}
                       </button>
                     )}
                   </div>
