@@ -15,8 +15,6 @@ dist-ssr
 
 # Environment variables (SECURITY RISK: Never push your API keys)
 .env
-.env.local
-.env.*
 
 # Editor directories and files
 .vscode/*

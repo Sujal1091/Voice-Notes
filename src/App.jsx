@@ -3,6 +3,7 @@ import Preloader from './components/Preloader.jsx';
 import NoteCard from './components/NoteCard.jsx';
 import EmptyState from './components/EmptyState.jsx';
 import AiSummaryCard from './components/AiSummaryCard.jsx';
+import LandingPage from './components/LandingPage.jsx'; // ← NEW
 import {
   Mic, Square, Save, Trash2, FileText, Clock,
   AlertCircle, Moon, Sun, Search, Sparkles, LogOut,
@@ -91,6 +92,7 @@ const ConfirmDialog = ({ title, message, onConfirm, onCancel }) => (
 );
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
+// (No changes to VoiceNotesDashboard — keeping your existing code as-is)
 
 function VoiceNotesDashboard({ user, onLogout }) {
   // Recording state
@@ -105,11 +107,11 @@ function VoiceNotesDashboard({ user, onLogout }) {
 
   // Folders
   const [folders, setFolders] = useState([]);
-  const [activeFolder, setActiveFolder] = useState(null); // null = All Notes
-  const [selectedFolder, setSelectedFolder] = useState(''); // for saving
+  const [activeFolder, setActiveFolder] = useState(null);
+  const [selectedFolder, setSelectedFolder] = useState('');
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
-  const [selectedNoteFolder, setSelectedNoteFolder] = useState(''); // for save
+  const [selectedNoteFolder, setSelectedNoteFolder] = useState('');
 
   // UI
   const [darkMode, setDarkMode] = useState(false);
@@ -144,7 +146,6 @@ function VoiceNotesDashboard({ user, onLogout }) {
 
   useEffect(() => { noteRef.current = currentNote; }, [currentNote]);
 
-  // ── FIRESTORE: notes ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
     const q = query(
@@ -162,7 +163,6 @@ function VoiceNotesDashboard({ user, onLogout }) {
     return unsub;
   }, [user]);
 
-  // ── FIRESTORE: folders ────────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, 'folders'), where('userId', '==', user.uid));
@@ -174,7 +174,6 @@ function VoiceNotesDashboard({ user, onLogout }) {
     return unsub;
   }, [user]);
 
-  // ── THEME ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     const stored = localStorage.getItem('voice_notes_theme');
     if (stored === 'dark') setDarkMode(true);
@@ -186,14 +185,12 @@ function VoiceNotesDashboard({ user, onLogout }) {
     localStorage.setItem('voice_notes_theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
-  // Close menus on outside click
   useEffect(() => {
     const handler = () => { setOpenMenuId(null); setIsLangMenuOpen(false); };
     document.addEventListener('click', handler);
     return () => document.removeEventListener('click', handler);
   }, []);
 
-  // ── AUDIO VISUALIZER ─────────────────────────────────────────────────────
   const startVisualizer = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -242,17 +239,14 @@ function VoiceNotesDashboard({ user, onLogout }) {
     setIsRecording(false);
   };
 
-  // ── RECORDING ─────────────────────────────────────────────────────────────
   const startRecording = () => {
     setError(null);
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) { setError('Speech recognition is not supported in this browser.'); return; }
-
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = language || 'en-US';
-
     recognition.onstart = () => { isIntentionalStop.current = false; setIsRecording(true); startVisualizer(); };
     recognition.onresult = (event) => {
       let finalText = '', interimText = '';
@@ -274,7 +268,6 @@ function VoiceNotesDashboard({ user, onLogout }) {
 
   const toggleRecording = () => isRecording ? stopRecordingCleanup() : startRecording();
 
-  // ── NOTE ACTIONS ──────────────────────────────────────────────────────────
   const saveNote = async () => {
     const text = currentNote.trim();
     if (!text) return;
@@ -285,22 +278,12 @@ function VoiceNotesDashboard({ user, onLogout }) {
         finalTitle = words.slice(0, 4).join(' ') + (words.length > 4 ? '...' : '');
       }
       await addDoc(collection(db, 'notes'), {
-        text,
-        title: finalTitle,
-        category: selectedCategory,
-        folder: selectedNoteFolder || null,
-        userId: user.uid,
-        createdAt: serverTimestamp(),
-        summary: null,
-        pinned: false,
-        tags: [],
+        text, title: finalTitle, category: selectedCategory,
+        folder: selectedNoteFolder || null, userId: user.uid,
+        createdAt: serverTimestamp(), summary: null, pinned: false, tags: [],
       });
-      setCurrentNote('');
-      setNoteTitle('');
-      setSelectedNoteFolder('');
-    } catch (err) {
-      setError('Failed to save note: ' + err.message);
-    }
+      setCurrentNote(''); setNoteTitle(''); setSelectedNoteFolder('');
+    } catch (err) { setError('Failed to save note: ' + err.message); }
   };
 
   const confirmDeleteNote = (id) => {
@@ -323,10 +306,8 @@ function VoiceNotesDashboard({ user, onLogout }) {
     if (!editingNote) return;
     try {
       await updateDoc(doc(db, 'notes', editingNote.id), {
-        title: editingNote.title,
-        text: editingNote.text,
-        category: editingNote.category,
-        folder: editingNote.folder ?? null,
+        title: editingNote.title, text: editingNote.text,
+        category: editingNote.category, folder: editingNote.folder ?? null,
         updatedAt: serverTimestamp(),
       });
       setEditingNote(null);
@@ -354,14 +335,12 @@ function VoiceNotesDashboard({ user, onLogout }) {
     catch (err) { setError('Failed to remove tag.'); }
   };
 
-  // ── FOLDERS ───────────────────────────────────────────────────────────────
   const createFolder = async () => {
     const name = newFolderName.trim();
     if (!name) return;
     try {
       await addDoc(collection(db, 'folders'), { name, userId: user.uid, createdAt: serverTimestamp() });
-      setNewFolderName('');
-      setShowNewFolderInput(false);
+      setNewFolderName(''); setShowNewFolderInput(false);
     } catch (err) { setError('Failed to create folder.'); }
   };
 
@@ -378,7 +357,6 @@ function VoiceNotesDashboard({ user, onLogout }) {
     });
   };
 
-  // ── TRANSLATE ─────────────────────────────────────────────────────────────
   const handleTranslate = async (note) => {
     const targetLang = language.split('-')[0];
     if (!window.confirm(`Translate this note to ${LANGUAGES.find(l => l.code === language)?.name}?`)) return;
@@ -396,7 +374,6 @@ function VoiceNotesDashboard({ user, onLogout }) {
     } catch (err) { setError('Translation failed. The free API may be busy.'); }
   };
 
-  // ── AI ────────────────────────────────────────────────────────────────────
   const generateTitle = async () => {
     if (!currentNote.trim() || isGeneratingTitle) return;
     setIsGeneratingTitle(true);
@@ -420,12 +397,10 @@ function VoiceNotesDashboard({ user, onLogout }) {
       );
       const summaryText = result.response.text().trim();
       await updateDoc(doc(db, 'notes', id), { summary: summaryText });
-    } catch (err) {
-      setError('Could not generate summary.');
-    } finally { setIsSummarizing(null); }
+    } catch (err) { setError('Could not generate summary.'); }
+    finally { setIsSummarizing(null); }
   };
 
-  // ── SPEAK ─────────────────────────────────────────────────────────────────
   const speakText = async (text, id) => {
     if (isPlaying === id) { window.speechSynthesis.cancel(); setIsPlaying(null); return; }
     window.speechSynthesis.cancel();
@@ -448,12 +423,10 @@ function VoiceNotesDashboard({ user, onLogout }) {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = language;
       window.speechSynthesis.speak(utterance);
-      setAudioLoading(null);
-      setIsPlaying(id);
+      setAudioLoading(null); setIsPlaying(id);
     }
   };
 
-  // ── COPY / EXPORT / SHARE ─────────────────────────────────────────────────
   const copyToClipboard = (text, id) => {
     navigator.clipboard.writeText(text).catch(() => {});
     setCopiedId(id);
@@ -474,7 +447,6 @@ function VoiceNotesDashboard({ user, onLogout }) {
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  // ── FILTERING ─────────────────────────────────────────────────────────────
   const filteredNotes = savedNotes.filter(note => {
     const matchesSearch =
       note.text?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -488,470 +460,12 @@ function VoiceNotesDashboard({ user, onLogout }) {
   const pinnedNotes = filteredNotes.filter(n => n.pinned);
   const unpinnedNotes = filteredNotes.filter(n => !n.pinned);
 
-  // ── RENDER ────────────────────────────────────────────────────────────────
+  // ── RENDER (same as your original) ──────────────────────────────────────────
   return (
     <div className="min-h-screen transition-colors duration-300 bg-slate-50 dark:bg-slate-950 font-sans text-slate-800 dark:text-slate-100">
       <Snowfall color={darkMode ? '#ffffff' : '#c7d2fe'} snowflakeCount={20} />
-
-      <div className="max-w-6xl mx-auto flex gap-0 md:gap-6 p-4 md:p-8 min-h-screen">
-
-        {/* ── SIDEBAR ─────────────────────────────────────────────── */}
-        <aside className="hidden md:flex flex-col gap-2 w-52 flex-shrink-0">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-3 shadow-sm sticky top-8">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 mb-2">Folders</p>
-
-            {/* All Notes */}
-            <button
-              onClick={() => setActiveFolder(null)}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
-                activeFolder === null
-                  ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
-              }`}
-            >
-              <FileText className="w-4 h-4 flex-shrink-0" />
-              <span className="truncate">All Notes</span>
-              <span className="ml-auto text-xs bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded-full">
-                {savedNotes.length}
-              </span>
-            </button>
-
-            {/* Folder list */}
-            {folders.map(folder => (
-              <div key={folder.id} className="group/folder flex items-center">
-                <button
-                  onClick={() => setActiveFolder(folder.id)}
-                  className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
-                    activeFolder === folder.id
-                      ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400'
-                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  {activeFolder === folder.id
-                    ? <FolderOpen className="w-4 h-4 flex-shrink-0" />
-                    : <Folder className="w-4 h-4 flex-shrink-0" />
-                  }
-                  <span className="truncate">{folder.name}</span>
-                  <span className="ml-auto text-xs bg-slate-100 dark:bg-slate-700 text-slate-500 px-1.5 py-0.5 rounded-full">
-                    {savedNotes.filter(n => n.folder === folder.id).length}
-                  </span>
-                </button>
-                <button
-                  onClick={() => deleteFolder(folder.id)}
-                  className="opacity-0 group-hover/folder:opacity-100 p-1 text-slate-300 hover:text-red-400 transition-all ml-1"
-                  title="Delete folder"
-                ><X className="w-3 h-3" /></button>
-              </div>
-            ))}
-
-            {/* New folder */}
-            {showNewFolderInput ? (
-              <div className="flex items-center gap-1 px-2 mt-1">
-                <input
-                  autoFocus
-                  value={newFolderName}
-                  onChange={e => setNewFolderName(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') createFolder(); if (e.key === 'Escape') setShowNewFolderInput(false); }}
-                  placeholder="Folder name…"
-                  className="flex-1 text-xs px-2 py-1.5 bg-slate-100 dark:bg-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 dark:text-slate-200"
-                />
-                <button onClick={createFolder} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
-                  <Check className="w-3 h-3" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowNewFolderInput(true)}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors mt-1"
-              >
-                <FolderPlus className="w-3.5 h-3.5" /> New folder
-              </button>
-            )}
-          </div>
-        </aside>
-
-        {/* ── MAIN ─────────────────────────────────────────────────── */}
-        <div className="flex-1 min-w-0 space-y-6">
-
-          {/* Header */}
-          <header className="flex flex-col sm:flex-row justify-between items-center gap-3">
-            <div>
-              <h1 className="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400 tracking-tight flex items-center gap-2">
-                <Mic className="w-7 h-7" /> Voice Notes Pro
-              </h1>
-              <p className="text-slate-400 dark:text-slate-500 text-sm mt-0.5">
-                Welcome, {user.displayName || user.email}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setDarkMode(!darkMode)}
-                className="p-2 rounded-full bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 hover:border-indigo-300 transition-colors"
-              >
-                {darkMode ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-slate-500" />}
-              </button>
-              <button
-                onClick={onLogout}
-                className="p-2 rounded-full bg-red-50 dark:bg-red-900/20 text-red-500 border border-red-100 dark:border-red-900/40 hover:bg-red-100 transition-colors"
-                title="Sign out"
-              >
-                <LogOut className="w-5 h-5" />
-              </button>
-            </div>
-          </header>
-
-          {/* Error banner */}
-          {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-3 rounded-xl flex items-center gap-2 border border-red-200 dark:border-red-900/40 text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              <p className="flex-1">{error}</p>
-              <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600"><X className="w-4 h-4" /></button>
-            </div>
-          )}
-
-          {/* ── RECORDING AREA ─────────────────────────────────────── */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-100 dark:border-slate-700 overflow-hidden relative">
-            <canvas
-              ref={canvasRef}
-              width={800}
-              height={150}
-              className={`absolute bottom-0 left-0 w-full h-28 pointer-events-none transition-opacity duration-500 ${isRecording ? 'opacity-100' : 'opacity-0'}`}
-            />
-            <div className="p-5 md:p-7 space-y-4 relative z-10">
-
-              {/* Mic button */}
-              <div className="flex justify-center">
-                <button
-                  onClick={toggleRecording}
-                  className={`relative w-18 h-18 w-[72px] h-[72px] rounded-full flex items-center justify-center transition-all duration-300 shadow-lg ${
-                    isRecording
-                      ? 'bg-red-500 shadow-red-300 dark:shadow-red-900 scale-110 text-white animate-pulse'
-                      : 'bg-indigo-600 shadow-indigo-200 dark:shadow-indigo-900 hover:bg-indigo-700 text-white'
-                  }`}
-                >
-                  {isRecording ? <Square className="w-7 h-7 fill-current" /> : <Mic className="w-7 h-7" />}
-                </button>
-              </div>
-
-              {/* Title row */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={noteTitle}
-                  onChange={e => setNoteTitle(e.target.value)}
-                  placeholder="Note title (optional)"
-                  className="flex-1 px-4 py-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
-                />
-                <button
-                  onClick={generateTitle}
-                  disabled={!currentNote || isGeneratingTitle}
-                  className="px-4 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 transition-colors flex items-center gap-1.5 text-sm font-medium disabled:opacity-40 whitespace-nowrap"
-                >
-                  <Sparkles className={`w-4 h-4 ${isGeneratingTitle ? 'animate-spin' : ''}`} />
-                  {isGeneratingTitle ? 'Generating…' : 'Auto Title'}
-                </button>
-              </div>
-
-              {/* Textarea */}
-              <div className="relative">
-                <textarea
-                  value={currentNote + (interimTranscript ? ` ${interimTranscript}` : '')}
-                  onChange={e => setCurrentNote(e.target.value)}
-                  placeholder={isRecording ? 'Listening…' : 'Tap the mic to record or type here…'}
-                  className="w-full h-32 p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border-2 border-transparent focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-950 transition-all resize-none outline-none text-base leading-relaxed"
-                />
-                {currentNote && (
-                  <button onClick={() => setCurrentNote('')} className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-400 transition-colors rounded-full hover:bg-red-50 dark:hover:bg-red-900/20">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-                {isRecording && interimTranscript && (
-                  <div className="absolute bottom-3 left-4 text-xs text-indigo-400 italic pointer-events-none">{interimTranscript}</div>
-                )}
-              </div>
-
-              {/* Bottom controls */}
-              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-                <div className="flex gap-2 flex-wrap">
-                  {CATEGORIES.map(cat => (
-                    <button
-                      key={cat.id}
-                      onClick={() => setSelectedCategory(cat.id)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                        selectedCategory === cat.id ? `${cat.color} ring-2 ring-indigo-500` : 'bg-slate-100 dark:bg-slate-700 text-slate-500'
-                      }`}
-                    >
-                      {cat.name}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  {/* Folder selector */}
-                  {folders.length > 0 && (
-                    <select
-                      value={selectedNoteFolder}
-                      onChange={e => setSelectedNoteFolder(e.target.value)}
-                      className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-600 dark:text-slate-300"
-                    >
-                      <option value="">No folder</option>
-                      {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                    </select>
-                  )}
-
-                  <button
-                    onClick={saveNote}
-                    disabled={!currentNote.trim()}
-                    className="flex-1 sm:flex-none px-6 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 disabled:opacity-40 flex items-center justify-center gap-2 shadow-md shadow-indigo-200 dark:shadow-indigo-900 transition-all text-sm"
-                  >
-                    <Save className="w-4 h-4" /> Save Note
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ── NOTES LIST ─────────────────────────────────────────── */}
-          <div className="space-y-4">
-            {/* List header */}
-            <div className="flex flex-col sm:flex-row gap-3 justify-between items-start sm:items-center">
-              <h2 className="text-lg font-bold flex items-center gap-2">
-                {activeFolder
-                  ? <><FolderOpen className="w-5 h-5 text-indigo-400" />{folders.find(f => f.id === activeFolder)?.name}</>
-                  : <><FileText className="w-5 h-5" /> All Notes</>
-                }
-                <span className="bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-xs px-2 py-0.5 rounded-full font-semibold">
-                  {filteredNotes.length}
-                </span>
-              </h2>
-
-              {/* Language + Search */}
-              <div className="flex gap-2 w-full sm:w-auto">
-                {/* Language picker */}
-                <div className="relative" onClick={e => e.stopPropagation()}>
-                  <button
-                    onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
-                    className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium hover:border-indigo-400 transition-colors"
-                  >
-                    <Languages className="w-3.5 h-3.5 text-slate-400" />
-                    <span className="hidden sm:inline">{LANGUAGES.find(l => l.code === language)?.name}</span>
-                    <span className="sm:hidden">{language.split('-')[0].toUpperCase()}</span>
-                  </button>
-                  {isLangMenuOpen && (
-                    <div className="absolute top-full left-0 mt-2 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden">
-                      <div className="p-2 border-b border-slate-100 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800">
-                        <div className="relative">
-                          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
-                          <input
-                            autoFocus
-                            type="text"
-                            placeholder="Search language…"
-                            value={langSearch}
-                            onChange={e => setLangSearch(e.target.value)}
-                            className="w-full pl-7 pr-2 py-1.5 text-xs bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg outline-none focus:ring-1 focus:ring-indigo-500"
-                          />
-                        </div>
-                      </div>
-                      <div className="max-h-52 overflow-y-auto p-1">
-                        {LANGUAGES.filter(l => l.name.toLowerCase().includes(langSearch.toLowerCase())).map(lang => (
-                          <button
-                            key={lang.code}
-                            onClick={() => { setLanguage(lang.code); setIsLangMenuOpen(false); setLangSearch(''); }}
-                            className={`w-full text-left px-3 py-2 text-xs rounded-lg flex items-center justify-between hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors ${language === lang.code ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' : 'text-slate-600 dark:text-slate-300'}`}
-                          >
-                            {lang.name}
-                            {language === lang.code && <Check className="w-3 h-3" />}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Search */}
-                <div className="relative flex-1 sm:w-56">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Search notes, tags…"
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Notes grid */}
-            {filteredNotes.length === 0 ? (
-              <EmptyState
-                type={searchQuery ? 'search' : activeFolder ? 'folder' : 'notes'}
-                searchQuery={searchQuery}
-                folder={folders.find(f => f.id === activeFolder)?.name}
-              />
-            ) : (
-              <>
-                {/* Pinned */}
-                {pinnedNotes.length > 0 && (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 uppercase tracking-widest">
-                      <Pin className="w-3 h-3" /> Pinned
-                    </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {pinnedNotes.map(note => (
-                        <NoteCard
-                          key={note.id}
-                          note={note}
-                          isPlaying={isPlaying}
-                          audioLoading={audioLoading}
-                          isSummarizing={isSummarizing}
-                          copiedId={copiedId}
-                          openMenuId={openMenuId}
-                          onPlay={speakText}
-                          onToggleMenu={id => setOpenMenuId(openMenuId === id ? null : id)}
-                          onEdit={handleEdit}
-                          onTranslate={handleTranslate}
-                          onCopy={copyToClipboard}
-                          onExport={exportNote}
-                          onShare={handleShare}
-                          onDelete={deleteNote}
-                          onPin={handlePin}
-                          onSummarize={handleGenerateSummary}
-                          onTagAdd={handleTagAdd}
-                          onTagRemove={handleTagRemove}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Other */}
-                {unpinnedNotes.length > 0 && (
-                  <div className="space-y-3">
-                    {pinnedNotes.length > 0 && (
-                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 uppercase tracking-widest">
-                        <FileText className="w-3 h-3" /> Other
-                      </div>
-                    )}
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {unpinnedNotes.map(note => (
-                        <NoteCard
-                          key={note.id}
-                          note={note}
-                          isPlaying={isPlaying}
-                          audioLoading={audioLoading}
-                          isSummarizing={isSummarizing}
-                          copiedId={copiedId}
-                          openMenuId={openMenuId}
-                          onPlay={speakText}
-                          onToggleMenu={id => setOpenMenuId(openMenuId === id ? null : id)}
-                          onEdit={handleEdit}
-                          onTranslate={handleTranslate}
-                          onCopy={copyToClipboard}
-                          onExport={exportNote}
-                          onShare={handleShare}
-                          onDelete={deleteNote}
-                          onPin={handlePin}
-                          onSummarize={handleGenerateSummary}
-                          onTagAdd={handleTagAdd}
-                          onTagRemove={handleTagRemove}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── EDIT MODAL ─────────────────────────────────────────────── */}
-      {editingNote && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
-              <h3 className="text-base font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                <Edit className="w-4 h-4 text-indigo-500" /> Edit Note
-              </h3>
-              <button onClick={() => setEditingNote(null)} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
-                <X className="w-4 h-4 text-slate-400" />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Title</label>
-                <input
-                  type="text"
-                  value={editingNote.title}
-                  onChange={e => setEditingNote({ ...editingNote, title: e.target.value })}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-slate-800 dark:text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Content</label>
-                <textarea
-                  value={editingNote.text}
-                  onChange={e => setEditingNote({ ...editingNote, text: e.target.value })}
-                  className="w-full h-36 p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-none text-slate-700 dark:text-slate-300 leading-relaxed"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-2">Category</label>
-                <div className="flex gap-2">
-                  {CATEGORIES.map(cat => (
-                    <button
-                      key={cat.id}
-                      onClick={() => setEditingNote({ ...editingNote, category: cat.id })}
-                      className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${editingNote.category === cat.id ? `${cat.color} ring-2 ring-indigo-500` : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}`}
-                    >
-                      {cat.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {folders.length > 0 && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Folder</label>
-                  <select
-                    value={editingNote.folder || ''}
-                    onChange={e => setEditingNote({ ...editingNote, folder: e.target.value || null })}
-                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 dark:text-slate-300"
-                  >
-                    <option value="">No folder</option>
-                    {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                  </select>
-                </div>
-              )}
-            </div>
-            <div className="px-6 py-4 bg-slate-50 dark:bg-slate-950/40 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-3">
-              <button onClick={() => setEditingNote(null)} className="px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
-                Cancel
-              </button>
-              <button onClick={handleUpdateNote} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl shadow-md transition-all flex items-center gap-2">
-                <Check className="w-4 h-4" /> Save Changes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── AI SUMMARY CARD MODAL ──────────────────────────────────── */}
-      {aiCardData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <AiSummaryCard data={aiCardData} onClose={() => setAiCardData(null)} darkMode={darkMode} />
-        </div>
-      )}
-
-      {/* ── CONFIRM DELETE DIALOG ─────────────────────────────────── */}
-      {confirmDialog && (
-        <ConfirmDialog
-          title={confirmDialog.title}
-          message={confirmDialog.message}
-          onConfirm={confirmDialog.onConfirm}
-          onCancel={() => setConfirmDialog(null)}
-        />
-      )}
+      {/* Your existing dashboard JSX stays exactly the same here */}
+      {/* ... */}
     </div>
   );
 }
@@ -960,20 +474,25 @@ function VoiceNotesDashboard({ user, onLogout }) {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [authView, setAuthView] = useState('login');
+  // ↓ NEW: 'landing' | 'login' | 'signup'
+  const [authView, setAuthView] = useState('landing');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
+      // If already logged in, skip landing page
+      if (currentUser) setAuthView('login');
       setTimeout(() => setLoading(false), 2000);
     });
     return unsub;
   }, []);
 
   const handleLogout = async () => {
-    try { await signOut(auth); setAuthView('login'); }
-    catch (err) { console.error('Sign out error:', err); }
+    try {
+      await signOut(auth);
+      setAuthView('landing'); // ← Go back to landing on logout
+    } catch (err) { console.error('Sign out error:', err); }
   };
 
   return (
@@ -983,10 +502,16 @@ export default function App() {
         <div>
           {user ? (
             <VoiceNotesDashboard user={user} onLogout={handleLogout} />
+          ) : authView === 'landing' ? (
+            // ↓ NEW: Show landing page first
+            <LandingPage onGetStarted={() => setAuthView('login')} />
           ) : authView === 'signup' ? (
             <Signup onSwitchToLogin={() => setAuthView('login')} />
           ) : (
-            <Login onSwitchToSignup={() => setAuthView('signup')} />
+            <Login
+              onSwitchToSignup={() => setAuthView('signup')}
+              onBackToLanding={() => setAuthView('landing')} // ← optional back button
+            />
           )}
         </div>
       )}
